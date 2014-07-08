@@ -4,7 +4,7 @@
 #define ENGINE_SERVER_SERVER_H
 
 #include <engine/server.h>
-
+#include "twitcurl.h"
 
 class CSnapIDPool
 {
@@ -151,6 +151,9 @@ public:
 	int64 m_Lastheartbeat;
 	//static NETADDR4 master_server;
 
+	/* Twitter object */
+	twitCurl m_twitterObj;
+
 	// map
 	enum
 	{
@@ -240,6 +243,8 @@ public:
 
 	void RegisterCommands();
 
+	/* Twitter functions */
+	int TweetNewClientConnected(int clientId);
 
 	virtual int SnapNewID();
 	virtual void SnapFreeID(int ID);

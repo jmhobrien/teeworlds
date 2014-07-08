@@ -427,7 +427,96 @@ int CServer::Init()
 		m_aClients[i].m_Snapshots.Init();
 	}
 
+	//initialize the twitter connection
+	/* Set twitter username and password */
+	std::string userName( "TWITTER_USERNAME" );
+    std::string passWord( "TWITTER_PASSWORD" );
+    m_twitterObj.setTwitterUsername( userName );
+    m_twitterObj.setTwitterPassword( passWord );
+	    /* OAuth flow begins */
+    /* Step 0: Set OAuth related params. These are got by registering your app at twitter.com */
+    m_twitterObj.getOAuth().setConsumerKey( std::string( "TWITTER_KEY" ) );
+    m_twitterObj.getOAuth().setConsumerSecret( std::string( "TWITTER_SECRET" ) );
+
+    /* Step 1: Check if we alredy have OAuth access token from a previous run */
+    std::string myOAuthAccessTokenKey("");
+    std::string myOAuthAccessTokenSecret("");
+    std::ifstream oAuthTokenKeyIn;
+    std::ifstream oAuthTokenSecretIn;
+
+    oAuthTokenKeyIn.open( "twitterClient_token_key.txt" );
+    oAuthTokenSecretIn.open( "twitterClient_token_secret.txt" );
+
+	char tmpBuf[1024];
+    memset( tmpBuf, 0, 1024 );
+    oAuthTokenKeyIn >> tmpBuf;
+    myOAuthAccessTokenKey = tmpBuf;
+
+    memset( tmpBuf, 0, 1024 );
+    oAuthTokenSecretIn >> tmpBuf;
+    myOAuthAccessTokenSecret = tmpBuf;
+
+    oAuthTokenKeyIn.close();
+    oAuthTokenSecretIn.close();
+
+    if( myOAuthAccessTokenKey.size() && myOAuthAccessTokenSecret.size() )
+    {
+        /* If we already have these keys, then no need to go through auth again */
+        printf( "\nUsing:\nKey: %s\nSecret: %s\n\n", myOAuthAccessTokenKey.c_str(), myOAuthAccessTokenSecret.c_str() );
+
+        m_twitterObj.getOAuth().setOAuthTokenKey( myOAuthAccessTokenKey );
+        m_twitterObj.getOAuth().setOAuthTokenSecret( myOAuthAccessTokenSecret );
+    }
+    else
+    {
+        /* Step 2: Get request token key and secret */
+        std::string authUrl;
+        m_twitterObj.oAuthRequestToken( authUrl );
+
+        /* Step 3: Get PIN  */
+       m_twitterObj.oAuthHandlePIN( authUrl );
+
+        /* Step 4: Exchange request token with access token */
+        m_twitterObj.oAuthAccessToken();
+
+        /* Step 5: Now, save this access token key and secret for future use without PIN */
+        m_twitterObj.getOAuth().getOAuthTokenKey( myOAuthAccessTokenKey );
+        m_twitterObj.getOAuth().getOAuthTokenSecret( myOAuthAccessTokenSecret );
+
+        /* Step 6: Save these keys in a file or wherever */
+        std::ofstream oAuthTokenKeyOut;
+        std::ofstream oAuthTokenSecretOut;
+
+        oAuthTokenKeyOut.open( "twitterClient_token_key.txt" );
+        oAuthTokenSecretOut.open( "twitterClient_token_secret.txt" );
+
+        oAuthTokenKeyOut.clear();
+        oAuthTokenSecretOut.clear();
+
+        oAuthTokenKeyOut << myOAuthAccessTokenKey.c_str();
+        oAuthTokenSecretOut << myOAuthAccessTokenSecret.c_str();
+
+        oAuthTokenKeyOut.close();
+        oAuthTokenSecretOut.close();
+    }
+    /* OAuth flow ends */
+
+	std::string replyMsg;
+    /* Account credentials verification */
+    if( m_twitterObj.accountVerifyCredGet() )
+    {
+        m_twitterObj.getLastWebResponse( replyMsg );
+        printf( "\ntwitterClient:: twitCurl::accountVerifyCredGet web response:\n%s\n", replyMsg.c_str() );
+    }
+    else
+    {
+        m_twitterObj.getLastCurlError( replyMsg );
+        printf( "\ntwitterClient:: twitCurl::accountVerifyCredGet error:\n%s\n", replyMsg.c_str() );
+    }
+
 	m_CurrentGameTick = 0;
+
+	
 
 	return 0;
 }
@@ -683,6 +772,7 @@ void CServer::DoSnapshot()
 
 int CServer::NewClientCallback(int ClientID, void *pUser)
 {
+	printf( "\nNew Client connected!\n");
 	CServer *pThis = (CServer *)pUser;
 	pThis->m_aClients[ClientID].m_State = CClient::STATE_AUTH;
 	pThis->m_aClients[ClientID].m_aName[0] = 0;
@@ -693,6 +783,27 @@ int CServer::NewClientCallback(int ClientID, void *pUser)
 	pThis->m_aClients[ClientID].m_pRconCmdToSend = 0;
 	pThis->m_aClients[ClientID].m_Quitting = false;
 	pThis->m_aClients[ClientID].Reset();
+
+	return 0;
+}
+
+int CServer::TweetNewClientConnected(int clientId) {
+	//Twitter notification!
+	/* Post a new status message */
+    std::stringstream tmpStr;
+	tmpStr << m_aClients[clientId].m_aName << " connected " <<  " (" << (int)time(NULL) << ") ";
+	std::string replyMsg;
+	std::string tweetTxt = tmpStr.str();
+    if( m_twitterObj.statusUpdate( tweetTxt ) )
+    {
+        m_twitterObj.getLastWebResponse( replyMsg );
+        printf( "\ntwitterClient:: twitCurl::statusUpdate web response:\n%s\n", replyMsg.c_str() );
+    }
+    else
+    {
+        m_twitterObj.getLastCurlError( replyMsg );
+        printf( "\ntwitterClient:: twitCurl::statusUpdate error:\n%s\n", replyMsg.c_str() );
+    }
 	return 0;
 }
 
@@ -900,6 +1011,10 @@ void CServer::ProcessClientPacket(CNetChunk *pPacket)
 				char aBuf[256];
 				str_format(aBuf, sizeof(aBuf), "player has entered the game. ClientID=%x addr=%s", ClientID, aAddrStr);
 				Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "server", aBuf);
+
+				//Tweet client connected!
+				TweetNewClientConnected(ClientID);
+
 				m_aClients[ClientID].m_State = CClient::STATE_INGAME;
 				GameServer()->OnClientEnter(ClientID);
 			}
